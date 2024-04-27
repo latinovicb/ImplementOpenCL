@@ -1,0 +1,20 @@
+From 80d6236adf8fb4d89a378b90beedc36a150a4d98 Mon Sep 17 00:00:00 2001
+From: BL <borek.latinovic@powerdynax.com>
+Date: Mon, 20 Nov 2023 01:18:29 +0200
+Subject: [PATCH 03/16] Create & add .cl file
+
+---
+ canny.cl | 1 +
+ 1 file changed, 1 insertion(+)
+ create mode 100644 canny.cl
+
+diff --git a/canny.cl b/canny.cl
+new file mode 100644
+index 0000000..8b13789
+--- /dev/null
++++ b/canny.cl
+@@ -0,0 +1 @@
++
+-- 
+2.34.1
+

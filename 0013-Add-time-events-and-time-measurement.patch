@@ -1,0 +1,302 @@
+From 7c1b7d4a8c0017e9866bc7b7fb1c325e915b6c44 Mon Sep 17 00:00:00 2001
+From: BL <borek.latinovic@powerdynax.com>
+Date: Sat, 25 Nov 2023 01:41:27 +0200
+Subject: [PATCH 13/16] Add time events & and time measurement
+
+Done for OpenCl functions and buffers.
+---
+ canny.c | 164 ++++++++++++++++++++++++++++++++++++--------------------
+ 1 file changed, 107 insertions(+), 57 deletions(-)
+
+diff --git a/canny.c b/canny.c
+index 370947e..866ac20 100644
+--- a/canny.c
++++ b/canny.c
+@@ -58,12 +58,20 @@ cl_kernel kernel_max_supp;
+ cl_event sobel3x3_event;
+ cl_event phaseAndMagnitude_event;
+ cl_event nonMaxSuppression_event;
+-cl_event input_image_event;
+-cl_event output_image_event;
+-cl_event magnitude_buffer_event;
+-cl_event phase_buffer_event;
+-cl_event soleb_x_event;
+-cl_event soleb_y_event;
++
++cl_event input_image_write_event;
++cl_event output_image_write_event;
++cl_event magnitude_buffer_write_event;
++cl_event phase_buffer_write_event;
++cl_event sobel_x_write_event;
++cl_event sobel_y_write_event;
++
++cl_event input_image_read_event;
++cl_event output_image_read_event;
++cl_event magnitude_buffer_read_event;
++cl_event phase_buffer_read_event;
++cl_event sobel_x_read_event;
++cl_event sobel_y_read_event;
+ 
+ //**********************************************************************
+ //
+@@ -239,49 +247,43 @@ cannyEdgeDetection(
+     uint16_t *magnitude = malloc(image_size * sizeof(uint16_t));
+     assert(magnitude);
+ 
+-    uint64_t times[5];
++    uint64_t times[17];
+     // Canny edge detection algorithm consists of the following functions:
+-    // times[0] = gettimemono_ns();
+-   
+ 
+-    // printf("%s", "Oriiginal values");
+-    // for (int i = 0; i < 10; i++) {
+-    //     printf("%d ", input[i]);
+-    // }
+ 
+    // *************************************************************
+    // Set up the OpenCL environment
++
+    // Read source file
+    const char* programSource = readSource("canny.cl");
+   
+-    // Write input images to buffers
+-
++    // -----------------------------------------Write_buffers-------------------------------------------
+    status = clEnqueueWriteBuffer(queue, buffer_input_image, CL_TRUE, 0, sizeof(uint8_t) * width * height, 
+-         input, 0, NULL, NULL);
++         input, 0, NULL, &input_image_write_event);
+    chk(status, "clEnqueueWriteBuffer");
+ 
+    status = clEnqueueWriteBuffer(queue, buffer_output_image, CL_TRUE, 0, sizeof(uint8_t) * width * height, 
+-         output, 0, NULL, NULL);
++         output, 0, NULL, &output_image_write_event);
+    chk(status, "clEnqueueWriteBuffer");
+ 
+    // Write variables to buffers
+    status = clEnqueueWriteBuffer(queue, sobel_x_input, CL_TRUE, 0, sizeof(int16_t) * width * height, 
+-         sobel_x, 0, NULL, NULL);
++         sobel_x, 0, NULL, &sobel_x_write_event);
+    chk(status, "clEnqueueWriteBuffer");
+ 
+    status = clEnqueueWriteBuffer(queue, sobel_y_input, CL_TRUE, 0, sizeof(int16_t) * width * height, 
+-         sobel_y, 0, NULL, NULL);
++         sobel_y, 0, NULL, &sobel_y_write_event);
+    chk(status, "clEnqueueWriteBuffer");
+ 
+    status = clEnqueueWriteBuffer(queue, phase_input, CL_TRUE, 0, sizeof(uint8_t) * width * height, 
+-         phase, 0, NULL, NULL);
++         phase, 0, NULL, &phase_buffer_write_event);
+    chk(status, "clEnqueueWriteBuffer");
+ 
+    status = clEnqueueWriteBuffer(queue, magnitude_input, CL_TRUE, 0, sizeof(uint8_t) * width * height, 
+-         magnitude, 0, NULL, NULL);
++         magnitude, 0, NULL, &magnitude_buffer_write_event);
+    chk(status, "clEnqueueWriteBuffer");
+ 
+-    // Create program object with source
++    // -----------------------------------------Create_program-------------------------------------------
+     program = clCreateProgramWithSource(context, 1, 
+         (const char**)&programSource, NULL, &status);
+    chk(status, "clCreateProgramWithSource");
+@@ -305,7 +307,6 @@ cannyEdgeDetection(
+ 
+    size_t globalSize[2] = {width, height};
+ 
+-   // times[1] = gettimemono_ns();
+     //----------------------------Sobel3x3----------------------------------
+    kernel_sobel = clCreateKernel(program, "sobel3x3", &status);
+    chk(status, "clCreateKernel");
+@@ -323,21 +324,21 @@ cannyEdgeDetection(
+    chk(status, "clEnqueueNDRange");
+ 
+    status = clEnqueueReadBuffer(queue, buffer_input_image, CL_TRUE, 0, sizeof(uint8_t) * width * height, 
+-         input, 0, NULL, NULL); 
++         input, 0, NULL, &input_image_read_event); 
+    chk(status, "clEnqueueReadBuffer");
+ 
+    status = clEnqueueReadBuffer(queue, sobel_x_input, CL_TRUE, 0, sizeof(uint16_t) * width * height, 
+-         sobel_x, 0, NULL, NULL); 
++         sobel_x, 0, NULL, &sobel_x_read_event); 
+    chk(status, "clEnqueueReadBuffer");
+ 
+    status = clEnqueueReadBuffer(queue, sobel_y_input, CL_TRUE, 0, sizeof(uint16_t) * width * height, 
+-         sobel_y, 0, NULL, NULL); 
++         sobel_y, 0, NULL, &sobel_y_read_event); 
+    chk(status, "clEnqueueReadBuffer");
+ 
+-  cl_double time_sobel3x3 = (cl_double)(getStartEndTime(sobel3x3_event))*(cl_double)(1e-6);
+-  printf("sobel3x3 time %f from cl\n", time_sobel3x3);
++  uint64_t time_sobel3x3 = (uint64_t)getStartEndTime(sobel3x3_event);
++  // cl_double time_sobel3x3_test = getStartEndTime(sobel3x3_event);
++  times[0] = time_sobel3x3;
+ 
+-   // times[2] = gettimemono_ns();
+ 
+     //----------------------------phaseAndMagnitude----------------------------------
+    kernel_phase_mag = clCreateKernel(program, "phaseAndMagnitude", &status);
+@@ -357,24 +358,25 @@ cannyEdgeDetection(
+ 
+    chk(status, "clEnqueueNDRange");
+ 
+-   status = clEnqueueReadBuffer(queue, sobel_x_input, CL_TRUE, 0, sizeof(uint16_t) * width * height, 
+-         sobel_x, 0, NULL, NULL); 
+-   chk(status, "clEnqueueReadBuffer");
++   // status = clEnqueueReadBuffer(queue, sobel_x_input, CL_TRUE, 0, sizeof(uint16_t) * width * height, 
++   //       sobel_x, 0, NULL, NULL); 
++   // chk(status, "clEnqueueReadBuffer");
+ 
+-   status = clEnqueueReadBuffer(queue, sobel_y_input, CL_TRUE, 0, sizeof(uint16_t) * width * height, 
+-         sobel_y, 0, NULL, NULL); 
+-   chk(status, "clEnqueueReadBuffer");
++   // status = clEnqueueReadBuffer(queue, sobel_y_input, CL_TRUE, 0, sizeof(uint16_t) * width * height, 
++   //       sobel_y, 0, NULL, NULL); 
++   // chk(status, "clEnqueueReadBuffer");
+ 
+    status = clEnqueueReadBuffer(queue, phase_input, CL_TRUE, 0, sizeof(uint8_t) * width * height, 
+-         phase, 0, NULL, NULL); 
++         phase, 0, NULL, &phase_buffer_read_event); 
+    chk(status, "clEnqueueReadBuffer");
+ 
+    status = clEnqueueReadBuffer(queue, magnitude_input, CL_TRUE, 0, sizeof(uint16_t) * width * height, 
+-         magnitude, 0, NULL, NULL); 
++         magnitude, 0, NULL, &magnitude_buffer_read_event); 
+    chk(status, "clEnqueueReadBuffer");
+ 
+-  cl_double time_phase_magnitude = (cl_double)(getStartEndTime(phaseAndMagnitude_event))*(cl_double)(1e-6);
+-  printf("phaseAndMagnitude time %f from cl\n", time_phase_magnitude);
++  cl_double time_phase_magnitude = getStartEndTime(phaseAndMagnitude_event);
++  // cl_double time_phase_magnitude_test = (cl_double)(getStartEndTime(phaseAndMagnitude_event))*(cl_double)(1e-6);
++  times[1] = time_phase_magnitude;
+   
+     //----------------------------nonMaxSuppression----------------------------------
+    kernel_max_supp = clCreateKernel(program, "nonMaxSuppression", &status);
+@@ -393,34 +395,66 @@ cannyEdgeDetection(
+       NULL, &nonMaxSuppression_event);
+    chk(status, "clEnqueueNDRange");
+ 
+-   status = clEnqueueReadBuffer(queue, phase_input, CL_TRUE, 0, sizeof(uint8_t) * width * height, 
+-         phase, 0, NULL, NULL); 
+-   chk(status, "clEnqueueReadBuffer");
++   // status = clEnqueueReadBuffer(queue, phase_input, CL_TRUE, 0, sizeof(uint8_t) * width * height, 
++   //       phase, 0, NULL, NULL); 
++   // chk(status, "clEnqueueReadBuffer");
+ 
+-   status = clEnqueueReadBuffer(queue, magnitude_input, CL_TRUE, 0, sizeof(uint16_t) * width * height, 
+-         magnitude, 0, NULL, NULL); 
+-   chk(status, "clEnqueueReadBuffer");
++   // status = clEnqueueReadBuffer(queue, magnitude_input, CL_TRUE, 0, sizeof(uint16_t) * width * height, 
++   //       magnitude, 0, NULL, NULL); 
++   // chk(status, "clEnqueueReadBuffer");
+ 
+    status = clEnqueueReadBuffer(queue, buffer_output_image, CL_TRUE, 0, sizeof(uint8_t) * width * height, 
+-         output, 0, NULL, NULL); 
++         output, 0, NULL, &output_image_read_event); 
+    chk(status, "clEnqueueReadBuffer");
+ 
+-  cl_double time_non_max_supp = (cl_double)(getStartEndTime(nonMaxSuppression_event))*(cl_double)(1e-6);
+-  printf("nonMaxSuppression time %f from cl\n", time_non_max_supp);
+-
+-    // times[3] = gettimemono_ns();
++  cl_double time_non_max_supp = getStartEndTime(nonMaxSuppression_event);
++  // cl_double time_non_max_supp_test = (cl_double)(getStartEndTime(nonMaxSuppression_event))*(cl_double)(1e-6);
++  times[2] = time_non_max_supp;
++
++    //----------------------------bufferTimers----------------------------------
++
++  cl_double time_input_image_write = getStartEndTime(input_image_write_event);
++  cl_double time_output_image_write = getStartEndTime(output_image_write_event);
++  cl_double time_maginte_buffer_write = getStartEndTime(magnitude_buffer_write_event);
++  cl_double time_phase_buffer_write = getStartEndTime(phase_buffer_write_event);
++  cl_double time_sobel_x_write = getStartEndTime(sobel_x_write_event);
++  cl_double time_sobel_y_write = getStartEndTime(sobel_y_write_event);
++
++  times[3] = time_input_image_write;
++  times[4] = time_output_image_write;
++  times[5] = time_maginte_buffer_write;
++  times[6] = time_phase_buffer_write;
++  times[7] = time_sobel_x_write;
++  times[8] = time_sobel_y_write;
++
++  // same way for the read buffer times
++  times[9] = getStartEndTime(input_image_read_event);
++  times[10] = getStartEndTime(output_image_read_event);
++  times[11] = getStartEndTime(magnitude_buffer_read_event);
++  times[12] = getStartEndTime(phase_buffer_read_event);
++  times[13] = getStartEndTime(sobel_x_read_event);
++  times[14] = getStartEndTime(sobel_y_read_event);
++
++    //----------------------------edgeTracing----------------------------------
++    times[15] = gettimemono_ns();
+     edgeTracing(output, width, height);  // modifies output in-place
+ 
+-    // times[4] = gettimemono_ns();
++    times[16] = gettimemono_ns();
+     // Release intermediate arrays
+     free(sobel_x);
+     free(sobel_y);
+     free(phase);
+     free(magnitude);
+ 
+-    for (int i = 0; i < 4; i++) {
+-        runtimes[i] = times[i + 1] - times[i];
+-        runtimes[i] /= 1000000.0;  // Convert ns to ms
++    for (int i = 0; i < 16; i++) {
++        if (i > 14){ // for the edgeTracing function which is not yet in OpenCL
++          runtimes[i] = times[i + 1] - times[i];
++          runtimes[i] /= 1000000.0;  // Convert ns to ms
++      }
++        else{
++          runtimes[i] = times[i];
++          runtimes[i] /= 1000000.0;  // Convert ns to ms
++    }
+     }
+ }
+ 
+@@ -668,7 +702,7 @@ main(int argc, char **argv) {
+         assert(output_image);
+ 
+         int all_the_runs_were_succesful = 1;
+-        double avg_runtimes[4] = {0.0, 0.0, 0.0, 0.0};
++        double avg_runtimes[16];
+         double avg_total = 0.0;
+         for (int iter = 0; iter < benchmarking_iterations; iter++) {
+             double iter_runtimes[4];
+@@ -676,7 +710,7 @@ main(int argc, char **argv) {
+                 input_image, width, height, threshold_lower, threshold_upper,
+                 output_image, iter_runtimes);
+ 
+-            for (int n = 0; n < 4; n++) {
++            for (int n = 0; n < 16; n++) {
+                 avg_runtimes[n] += iter_runtimes[n] / benchmarking_iterations;
+                 avg_total += iter_runtimes[n] / benchmarking_iterations;
+             }
+@@ -712,8 +746,24 @@ main(int argc, char **argv) {
+         printf("Sobel3x3 time          : %0.3f ms\n", avg_runtimes[0]);
+         printf("phaseAndMagnitude time : %0.3f ms\n", avg_runtimes[1]);
+         printf("nonMaxSuppression time : %0.3f ms\n", avg_runtimes[2]);
+-        printf("edgeTracing time       : %0.3f ms\n", avg_runtimes[3]);
++        printf("input image write buffer time         : %0.3f ms\n", avg_runtimes[3]);
++        printf("output image write buffer time        : %0.3f ms\n", avg_runtimes[4]);
++        printf("magnitude buffer write buffer time    : %0.3f ms\n", avg_runtimes[5]);
++        printf("phase buffer write buffer time        : %0.3f ms\n", avg_runtimes[6]);
++        printf("sobel x write buffer time             : %0.3f ms\n", avg_runtimes[7]);
++        printf("sobel y write buffer time             : %0.3f ms\n", avg_runtimes[8]);
++
++        printf("input image read buffer time         : %0.3f ms\n", avg_runtimes[9]);
++        printf("output image read buffer time        : %0.3f ms\n", avg_runtimes[10]);
++        printf("magnitude buffer read buffer time    : %0.3f ms\n", avg_runtimes[11]);
++        printf("phase buffer read buffer time        : %0.3f ms\n", avg_runtimes[12]);
++        printf("sobel x read buffer time             : %0.3f ms\n", avg_runtimes[13]);
++        printf("sobel y read buffer time             : %0.3f ms\n", avg_runtimes[14]);
++
++        printf("edgeTracing time       : %0.3f ms\n", avg_runtimes[15]);
++
+         printf("Total time             : %0.3f ms\n", avg_total);
++
+         write_pgm(output_image_path, output_image, width, height);
+         printf("Wrote output to %s\n", output_image_path);
+         if (all_the_runs_were_succesful) {
+-- 
+2.34.1
+

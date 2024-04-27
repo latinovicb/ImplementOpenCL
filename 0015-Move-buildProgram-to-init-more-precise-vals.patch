@@ -1,0 +1,133 @@
+From 038792d9c6c23f443d56ba725f60522a6ff7b82a Mon Sep 17 00:00:00 2001
+From: BL <borek.latinovic@powerdynax.com>
+Date: Sat, 25 Nov 2023 18:15:24 +0200
+Subject: [PATCH 15/16] Move buildProgram to init & more precise vals
+
+---
+ canny.c | 89 +++++++++++++++++++++++++++++----------------------------
+ 1 file changed, 45 insertions(+), 44 deletions(-)
+
+diff --git a/canny.c b/canny.c
+index 3d59028..e29bb9e 100644
+--- a/canny.c
++++ b/canny.c
+@@ -254,8 +254,6 @@ cannyEdgeDetection(
+    // *************************************************************
+    // Set up the OpenCL environment
+ 
+-   // Read source file
+-   const char* programSource = readSource("canny.cl");
+   
+     // -----------------------------------------Write_buffers-------------------------------------------
+    status = clEnqueueWriteBuffer(queue, buffer_input_image, CL_TRUE, 0, sizeof(uint8_t) * width * height, 
+@@ -283,28 +281,6 @@ cannyEdgeDetection(
+          magnitude, 0, NULL, &magnitude_buffer_write_event);
+    chk(status, "clEnqueueWriteBuffer");
+ 
+-    // -----------------------------------------Create_program-------------------------------------------
+-    program = clCreateProgramWithSource(context, 1, 
+-        (const char**)&programSource, NULL, &status);
+-   chk(status, "clCreateProgramWithSource");
+-
+-   status = clBuildProgram(program, 1, devices, NULL, NULL, NULL);
+-
+-   // get program build info
+-   size_t log_size;
+-
+-   clGetProgramBuildInfo(program, devices[0], CL_PROGRAM_BUILD_LOG, 0, NULL, &log_size);
+-
+-   char *log = (char *) malloc(log_size);
+-
+-   clGetProgramBuildInfo(program, devices[0], CL_PROGRAM_BUILD_LOG, log_size, log, NULL);
+-
+-   printf("%s\n", "Build program log: \n");
+-   printf("%s\n", log);
+-
+-   chk(status, "clBuildProgram");
+-   // Create the kernel object
+-
+    size_t globalSize[2] = {width, height};
+ 
+     //----------------------------Sobel3x3----------------------------------
+@@ -530,6 +506,31 @@ init(
+    chk(status, "clCreateBuffer");
+ 
+ 
++    // -----------------------------------------Create_program-------------------------------------------
++   // Read source file
++    const char* programSource = readSource("canny.cl");
++
++    program = clCreateProgramWithSource(context, 1, 
++        (const char**)&programSource, NULL, &status);
++   chk(status, "clCreateProgramWithSource");
++
++   status = clBuildProgram(program, 1, devices, NULL, NULL, NULL);
++
++   // get program build info
++   size_t log_size;
++
++   clGetProgramBuildInfo(program, devices[0], CL_PROGRAM_BUILD_LOG, 0, NULL, &log_size);
++
++   char *log = (char *) malloc(log_size);
++
++   clGetProgramBuildInfo(program, devices[0], CL_PROGRAM_BUILD_LOG, log_size, log, NULL);
++
++   printf("%s\n", "Build program log: \n");
++   printf("%s\n", log);
++
++   chk(status, "clBuildProgram");
++   // Create the kernel object
++
+ }
+ 
+ void
+@@ -747,26 +748,26 @@ main(int argc, char **argv) {
+             }
+         }
+ 
+-        printf("Sobel3x3 time          : %0.3f ms\n", avg_runtimes[0]);
+-        printf("phaseAndMagnitude time : %0.3f ms\n", avg_runtimes[1]);
+-        printf("nonMaxSuppression time : %0.3f ms\n", avg_runtimes[2]);
+-        printf("input image write buffer time         : %0.3f ms\n", avg_runtimes[3]);
+-        printf("output image write buffer time        : %0.3f ms\n", avg_runtimes[4]);
+-        printf("magnitude buffer write buffer time    : %0.3f ms\n", avg_runtimes[5]);
+-        printf("phase buffer write buffer time        : %0.3f ms\n", avg_runtimes[6]);
+-        printf("sobel x write buffer time             : %0.3f ms\n", avg_runtimes[7]);
+-        printf("sobel y write buffer time             : %0.3f ms\n", avg_runtimes[8]);
+-
+-        printf("input image read buffer time         : %0.3f ms\n", avg_runtimes[9]);
+-        printf("output image read buffer time        : %0.3f ms\n", avg_runtimes[10]);
+-        printf("magnitude buffer read buffer time    : %0.3f ms\n", avg_runtimes[11]);
+-        printf("phase buffer read buffer time        : %0.3f ms\n", avg_runtimes[12]);
+-        printf("sobel x read buffer time             : %0.3f ms\n", avg_runtimes[13]);
+-        printf("sobel y read buffer time             : %0.3f ms\n", avg_runtimes[14]);
+-
+-        printf("edgeTracing time       : %0.3f ms\n", avg_runtimes[15]);
+-
+-        printf("Total time             : %0.3f ms\n", avg_total);
++        printf("Sobel3x3 time          : %0.6f ms\n", avg_runtimes[0]);
++        printf("phaseAndMagnitude time : %0.6f ms\n", avg_runtimes[1]);
++        printf("nonMaxSuppression time : %0.6f ms\n", avg_runtimes[2]);
++        printf("input image write buffer time         : %0.6f ms\n", avg_runtimes[3]);
++        printf("output image write buffer time        : %0.6f ms\n", avg_runtimes[4]);
++        printf("magnitude buffer write buffer time    : %0.6f ms\n", avg_runtimes[5]);
++        printf("phase buffer write buffer time        : %0.6f ms\n", avg_runtimes[6]);
++        printf("sobel x write buffer time             : %0.6f ms\n", avg_runtimes[7]);
++        printf("sobel y write buffer time             : %0.6f ms\n", avg_runtimes[8]);
++
++        printf("input image read buffer time         : %0.6f ms\n", avg_runtimes[9]);
++        printf("output image read buffer time        : %0.6f ms\n", avg_runtimes[10]);
++        printf("magnitude buffer read buffer time    : %0.6f ms\n", avg_runtimes[11]);
++        printf("phase buffer read buffer time        : %0.6f ms\n", avg_runtimes[12]);
++        printf("sobel x read buffer time             : %0.6f ms\n", avg_runtimes[13]);
++        printf("sobel y read buffer time             : %0.6f ms\n", avg_runtimes[14]);
++
++        printf("edgeTracing time       : %0.6f ms\n", avg_runtimes[15]);
++
++        printf("Total time             : %0.6f ms\n", avg_total);
+ 
+         write_pgm(output_image_path, output_image, width, height);
+         printf("Wrote output to %s\n", output_image_path);
+-- 
+2.34.1
+

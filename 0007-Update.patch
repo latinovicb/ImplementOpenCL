@@ -1,0 +1,96 @@
+From bfe0f4e2984b2a93be7486422f93b3b6bd494b67 Mon Sep 17 00:00:00 2001
+From: BL <borek.latinovic@powerdynax.com>
+Date: Thu, 23 Nov 2023 20:06:10 +0200
+Subject: [PATCH 07/16] Update
+
+Upon further inspection we discovered that values passed to the kernel
+functions are correct.
+The issue is when the kernel function writes values to the array itself.
+Global_id seems to be alright but the values which are put into array
+are incorrect.
+---
+ canny.c | 37 +++++++++++++++++++++++++++++++++----
+ 1 file changed, 33 insertions(+), 4 deletions(-)
+
+diff --git a/canny.c b/canny.c
+index f3abdec..e25534e 100644
+--- a/canny.c
++++ b/canny.c
+@@ -375,6 +375,11 @@ cannyEdgeDetection(
+     times[0] = gettimemono_ns();
+    
+ 
++    // printf("%s", "Oriiginal values");
++    // for (int i = 0; i < 10; i++) {
++    //     printf("%d ", input[i]);
++    // }
++
+    // *************************************************************
+    // Set up the OpenCL environment
+    // Read source file
+@@ -418,7 +423,7 @@ cannyEdgeDetection(
+    char *log = (char *) malloc(log_size);
+ 
+    clGetProgramBuildInfo(program, devices[0], CL_PROGRAM_BUILD_LOG, log_size, log, NULL);
+-  
++
+    printf("%s\n", "Build program log: \n");
+    printf("%s\n", log);
+ 
+@@ -437,7 +442,7 @@ cannyEdgeDetection(
+     status |= clSetKernelArg(kernel_sobel, 3, sizeof(cl_mem), &sobel_x_input);
+     status |= clSetKernelArg(kernel_sobel, 4, sizeof(cl_mem), &sobel_y_input);
+     chk(status, "clSetKernelArg");
+-  
++
+ 
+    size_t globalSize[2] = {width, height};
+ 
+@@ -450,18 +455,42 @@ cannyEdgeDetection(
+          input, 0, NULL, NULL); 
+    chk(status, "clEnqueueReadBuffer");
+ 
+-   status = clEnqueueReadBuffer(queue, sobel_x_input, CL_TRUE, 0, sizeof(uint8_t) * width * height, 
++   status = clEnqueueReadBuffer(queue, sobel_x_input, CL_TRUE, 0, sizeof(uint16_t) * width * height, 
+          sobel_x, 0, NULL, NULL); 
+    chk(status, "clEnqueueReadBuffer");
+ 
+-   status = clEnqueueReadBuffer(queue, sobel_y_input, CL_TRUE, 0, sizeof(uint8_t) * width * height, 
++   status = clEnqueueReadBuffer(queue, sobel_y_input, CL_TRUE, 0, sizeof(uint16_t) * width * height, 
+          sobel_y, 0, NULL, NULL); 
+    chk(status, "clEnqueueReadBuffer");
+ 
++
++    // printf("%s", "Values taken from buffer");
++    // for (int i = 0; i < 10; i++) {
++    //     printf("%d ", input[i]);
++    // }
++
++
+    // CONTINUE HERE from rotator project
+ 
++    // printf("%s", "Values taken from buffer");
++    // printf("%d", sobel_x);
++    // for (int i = 0; i < 10000; i++) {
++    //     printf("%d ", sobel_x[i]);
++    // }
++    // // printf("%d", sobel_y);
++    // printf("\n");
++    // printf("\n");
+     // sobel3x3(input, width, height, sobel_x, sobel_y);
+ 
++    // printf("%s", "Values from original function ");
++    // // printf("%d", sobel_x);
++    // for (int i = 0; i < 10000; i++) {
++    //     printf("%d ", sobel_x[i]);
++    // }
++
++    // // printf("%d", sobel_y);
++    // printf("\n");
++
+     times[1] = gettimemono_ns();
+     phaseAndMagnitude(sobel_x, sobel_y, width, height, phase, magnitude);
+ 
+-- 
+2.34.1
+

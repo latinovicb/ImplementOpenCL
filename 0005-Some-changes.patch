@@ -1,0 +1,267 @@
+From c505c4a776ba1e38f526292ed50b72eb1fa52993 Mon Sep 17 00:00:00 2001
+From: BL <borek.latinovic@powerdynax.com>
+Date: Tue, 21 Nov 2023 23:26:35 +0200
+Subject: [PATCH 05/16] Some changes
+
+Add parameter to Makefile
+Add program build info
+Disable previous timer functions
+---
+ Makefile |   2 +-
+ canny.c  |  31 +++++++++---
+ canny.cl | 147 +++++++++----------------------------------------------
+ 3 files changed, 48 insertions(+), 132 deletions(-)
+
+diff --git a/Makefile b/Makefile
+index c1c98bd..76da29b 100644
+--- a/Makefile
++++ b/Makefile
+@@ -3,4 +3,4 @@ OPENCL_INCLUDE_PATH = /opt/AMDAPP/include
+ OPENCL_LIB_PATH = /opt/AMDAPP/lib/x86_64
+ 
+ canny: canny.c
+-	$(CC) -o canny canny.c -I${OPENCL_INCLUDE_PATH} -L${OPENCL_LIB_PATH} -lOpenCL
++	$(CC) -o canny util.c opencl_util.c canny.c -I${OPENCL_INCLUDE_PATH} -L${OPENCL_LIB_PATH} -lOpenCL -lm
+diff --git a/canny.c b/canny.c
+index 992e844..68e7c7a 100644
+--- a/canny.c
++++ b/canny.c
+@@ -372,13 +372,13 @@ cannyEdgeDetection(
+ 
+     uint64_t times[5];
+     // Canny edge detection algorithm consists of the following functions:
+-    times[0] = gettimemono_ns();
++    // times[0] = gettimemono_ns();
+    
+ 
+    // *************************************************************
+    // Set up the OpenCL environment
+    // Read source file
+-   const char* source = readSource("rotation.cl");
++   const char* programSource = readSource("canny.cl");
+   
+     // Write input images to buffers
+ 
+@@ -404,11 +404,25 @@ cannyEdgeDetection(
+    chk(status, "clEnqueueWriteBuffer");
+ 
+     // Create program object with source
+-   program = clCreateProgramWithSource(context, 1, &source, NULL, NULL);
++    program = clCreateProgramWithSource(context, 1, 
++        (const char**)&programSource, NULL, &status);
+    chk(status, "clCreateProgramWithSource");
++
+    status = clBuildProgram(program, 1, devices, NULL, NULL, NULL);
+-   chk(status, "clBuildProgram");
+ 
++   // get program build info
++   size_t log_size;
++
++   clGetProgramBuildInfo(program, devices[0], CL_PROGRAM_BUILD_LOG, 0, NULL, &log_size);
++
++   char *log = (char *) malloc(log_size);
++
++   clGetProgramBuildInfo(program, devices[0], CL_PROGRAM_BUILD_LOG, log_size, log, NULL);
++  
++   printf("%s\n", "Build program log: \n");
++   printf("%s\n", log);
++
++   chk(status, "clBuildProgram");
+    // Create the kernel object
+ 
+    kernel_sobel = clCreateKernel(program, "sobel3x3", &status);
+@@ -444,18 +458,18 @@ cannyEdgeDetection(
+ 
+     // sobel3x3(input, width, height, sobel_x, sobel_y);
+ 
+-    times[1] = gettimemono_ns();
++    // times[1] = gettimemono_ns();
+     phaseAndMagnitude(sobel_x, sobel_y, width, height, phase, magnitude);
+ 
+-    times[2] = gettimemono_ns();
++    // times[2] = gettimemono_ns();
+     nonMaxSuppression(
+         magnitude, phase, width, height, threshold_lower, threshold_upper,
+         output);
+ 
+-    times[3] = gettimemono_ns();
++    // times[3] = gettimemono_ns();
+     edgeTracing(output, width, height);  // modifies output in-place
+ 
+-    times[4] = gettimemono_ns();
++    // times[4] = gettimemono_ns();
+     // Release intermediate arrays
+     free(sobel_x);
+     free(sobel_y);
+@@ -552,6 +566,7 @@ destroy() {
+     clReleaseMemObject(sobel_y_input);
+     clReleaseMemObject(phase_input);
+     clReleaseMemObject(magnitude_input);
++    clReleaseContext(context);
+ 
+     // release rest of the stuff as well
+     // clReleaseMemObject(bufA);
+diff --git a/canny.cl b/canny.cl
+index 2b3ba3d..ab633bf 100644
+--- a/canny.cl
++++ b/canny.cl
+@@ -1,132 +1,33 @@
+-#define WIDTH   // Define the width of your image
+-#define HEIGHT  // Define the height of your image
+-
+-__kernel void sobel3x3(__global const uchar *in,
+-                       __global short *output_x,
+-                       __global short *output_y) {
+-    size_t gid_x = get_global_id(0);  // Equivalent to 'x' in the original code
+-    size_t gid_y = get_global_id(1);  // Equivalent to 'y' in the original code
+-
+-    if (gid_x < WIDTH && gid_y < HEIGHT) {
+-        size_t gid = gid_y * WIDTH + gid_x;
+-
+-        /* 3x3 sobel filter, first in x direction */
+-        output_x[gid] = (-1) * in[idx(gid_x, gid_y, WIDTH, HEIGHT, -1, -1)] +
+-                        1 * in[idx(gid_x, gid_y, WIDTH, HEIGHT, 1, -1)] +
+-                        (-2) * in[idx(gid_x, gid_y, WIDTH, HEIGHT, -1, 0)] +
+-                        2 * in[idx(gid_x, gid_y, WIDTH, HEIGHT, 1, 0)] +
+-                        (-1) * in[idx(gid_x, gid_y, WIDTH, HEIGHT, -1, 1)] +
+-                        1 * in[idx(gid_x, gid_y, WIDTH, HEIGHT, 1, 1)];
+-
+-        /* 3x3 sobel filter, in y direction */
+-        output_y[gid] = (-1) * in[idx(gid_x, gid_y, WIDTH, HEIGHT, -1, -1)] +
+-                        1 * in[idx(gid_x, gid_y, WIDTH, HEIGHT, -1, 1)] +
+-                        (-2) * in[idx(gid_x, gid_y, WIDTH, HEIGHT, 0, -1)] +
+-                        2 * in[idx(gid_x, gid_y, WIDTH, HEIGHT, 0, 1)] +
+-                        (-1) * in[idx(gid_x, gid_y, WIDTH, HEIGHT, 1, -1)] +
+-                        1 * in[idx(gid_x, gid_y, WIDTH, HEIGHT, 1, 1)];
+-    }
+-}
+-
+-#define PI 3.14159265358979323846
+-
+-__kernel void phaseAndMagnitude(
+-    __global const short *restrict in_x, __global const short *restrict in_y,
+-    const unsigned int width, const unsigned int height,
+-    __global uchar *restrict phase_out,
+-    __global ushort *restrict magnitude_out) {
+-
++__kernel void sobel3x3(
++    __global const uchar *restrict in,
++    const size_t width,
++    const size_t height,
++    __global short *restrict output_x,
++    __global short *restrict output_y) {
++    // Get global ID in 2D
+     size_t gid_x = get_global_id(0);
+     size_t gid_y = get_global_id(1);
+ 
++    // Ensure the global ID is within the image dimensions
+     if (gid_x < width && gid_y < height) {
++        // Calculate linear index
+         size_t gid = gid_y * width + gid_x;
+ 
+-        // Output in range -PI:PI
+-        float angle = atan2(in_y[gid], in_x[gid]);
+-
+-        // Shift range -1:1
+-        angle /= PI;
+-
+-        // Shift range -127.5:127.5
+-        angle *= 127.5;
+-
+-        // Shift range 0.5:255.5
+-        angle += (127.5 + 0.5);
+-
+-        // Downcasting truncates angle to range 0:255
+-        phase_out[gid] = convert_uchar_sat(angle);
+-
+-        magnitude_out[gid] = abs(in_x[gid]) + abs(in_y[gid]);
+-    }
+-}
+-
+-__kernel void nonMaxSuppression(
+-    __global const ushort *magnitude, __global const uchar *phase,
+-    size_t width, size_t height, short threshold_lower,
+-    ushort threshold_upper, __global uchar *out) {
+-    
+-    size_t gid_x = get_global_id(0);
+-    size_t gid_y = get_global_id(1);
+-    size_t gid = gid_y * width + gid_x;
+-
+-    uchar sobel_angle = phase[gid];
+-
+-    if (sobel_angle > 127) {
+-        sobel_angle -= 128;
++        // Sobel filter in x direction
++        output_x[gid] = (-1) * in[idx(gid_x, gid_y, width, height, -1, -1)] +
++                        1 * in[idx(gid_x, gid_y, width, height, 1, -1)] +
++                        (-2) * in[idx(gid_x, gid_y, width, height, -1, 0)] +
++                        2 * in[idx(gid_x, gid_y, width, height, 1, 0)] +
++                        (-1) * in[idx(gid_x, gid_y, width, height, -1, 1)] +
++                        1 * in[idx(gid_x, gid_y, width, height, 1, 1)];
++
++        // Sobel filter in y direction
++        output_y[gid] = (-1) * in[idx(gid_x, gid_y, width, height, -1, -1)] +
++                        1 * in[idx(gid_x, gid_y, width, height, -1, 1)] +
++                        (-2) * in[idx(gid_x, gid_y, width, height, 0, -1)] +
++                        2 * in[idx(gid_x, gid_y, width, height, 0, 1)] +
++                        (-1) * in[idx(gid_x, gid_y, width, height, 1, -1)] +
++                        1 * in[idx(gid_x, gid_y, width, height, 1, 1)];
+     }
+-
+-    int sobel_orientation = 0;
+-
+-    if (sobel_angle < 16 || sobel_angle >= (7 * 16)) {
+-        sobel_orientation = 2;
+-    } else if (sobel_angle >= 16 && sobel_angle < 16 * 3) {
+-        sobel_orientation = 1;
+-    } else if (sobel_angle >= 16 * 3 && sobel_angle < 16 * 5) {
+-        sobel_orientation = 0;
+-    } else if (sobel_angle > 16 * 5 && sobel_angle <= 16 * 7) {
+-        sobel_orientation = 3;
+-    }
+-
+-    ushort sobel_magnitude = magnitude[gid];
+-    /* Non-maximum suppression
+-     * Pick out the two neighbors that are perpendicular to the
+-     * current edge pixel */
+-    ushort neighbour_max = 0;
+-    ushort neighbour_max2 = 0;
+-
+-    switch (sobel_orientation) {
+-        case 0:
+-            neighbour_max = magnitude[gid - width];
+-            neighbour_max2 = magnitude[gid + width];
+-            break;
+-        case 1:
+-            neighbour_max = magnitude[gid - width - 1];
+-            neighbour_max2 = magnitude[gid + width + 1];
+-            break;
+-        case 2:
+-            neighbour_max = magnitude[gid - 1];
+-            neighbour_max2 = magnitude[gid + 1];
+-            break;
+-        case 3:
+-        default:
+-            neighbour_max = magnitude[gid + width - 1];
+-            neighbour_max2 = magnitude[gid - width + 1];
+-            break;
+-    }
+-
+-    // Suppress the pixel here
+-    if ((sobel_magnitude < neighbour_max) ||
+-        (sobel_magnitude < neighbour_max2)) {
+-        sobel_magnitude = 0;
+-    }
+-
+-    /* Double thresholding */
+-    // Marks YES pixels with 255, NO pixels with 0, and MAYBE pixels
+-    // with 127
+-    uchar t = 127;
+-    if (sobel_magnitude > threshold_upper) t = 255;
+-    if (sobel_magnitude <= threshold_lower) t = 0;
+-    out[gid] = t;
+ }
+ 
+-- 
+2.34.1
+

@@ -1,0 +1,129 @@
+From 6f963f560ee867de73e1a271c8d78886c304f529 Mon Sep 17 00:00:00 2001
+From: BL <borek.latinovic@powerdynax.com>
+Date: Fri, 1 Dec 2023 17:16:07 +0200
+Subject: [PATCH 16/16] Remove unessecary prints for the project
+
+---
+ canny.c | 62 +++++++++++++++++++++++++++++----------------------------
+ 1 file changed, 32 insertions(+), 30 deletions(-)
+
+diff --git a/canny.c b/canny.c
+index e29bb9e..e51ebc7 100644
+--- a/canny.c
++++ b/canny.c
+@@ -247,7 +247,7 @@ cannyEdgeDetection(
+     uint16_t *magnitude = malloc(image_size * sizeof(uint16_t));
+     assert(magnitude);
+ 
+-    uint64_t times[17];
++    uint64_t times[7];
+     // Canny edge detection algorithm consists of the following functions:
+ 
+ 
+@@ -401,33 +401,33 @@ cannyEdgeDetection(
+   cl_double time_sobel_y_write = getStartEndTime(sobel_y_write_event);
+ 
+   times[3] = time_input_image_write;
+-  times[4] = time_output_image_write;
+-  times[5] = time_maginte_buffer_write;
+-  times[6] = time_phase_buffer_write;
+-  times[7] = time_sobel_x_write;
+-  times[8] = time_sobel_y_write;
++  // times[4] = time_output_image_write;
++  // times[5] = time_maginte_buffer_write;
++  // times[6] = time_phase_buffer_write;
++  // times[7] = time_sobel_x_write;
++  // times[8] = time_sobel_y_write;
+ 
+   // same way for the read buffer times
+-  times[9] = getStartEndTime(input_image_read_event);
+-  times[10] = getStartEndTime(output_image_read_event);
+-  times[11] = getStartEndTime(magnitude_buffer_read_event);
+-  times[12] = getStartEndTime(phase_buffer_read_event);
+-  times[13] = getStartEndTime(sobel_x_read_event);
+-  times[14] = getStartEndTime(sobel_y_read_event);
++  // times[9] = getStartEndTime(input_image_read_event);
++  times[4] = getStartEndTime(output_image_read_event);
++  // times[11] = getStartEndTime(magnitude_buffer_read_event);
++  // times[12] = getStartEndTime(phase_buffer_read_event);
++  // times[13] = getStartEndTime(sobel_x_read_event);
++  // times[14] = getStartEndTime(sobel_y_read_event);
+ 
+     //----------------------------edgeTracing----------------------------------
+-    times[15] = gettimemono_ns();
++    times[5] = gettimemono_ns();
+     edgeTracing(output, width, height);  // modifies output in-place
+ 
+-    times[16] = gettimemono_ns();
++    times[6] = gettimemono_ns();
+     // Release intermediate arrays
+     free(sobel_x);
+     free(sobel_y);
+     free(phase);
+     free(magnitude);
+ 
+-    for (int i = 0; i < 16; i++) {
+-        if (i > 14){ // for the edgeTracing function which is not yet in OpenCL
++    for (int i = 0; i < 6; i++) {
++        if (i > 4){ // for the edgeTracing function which is not yet in OpenCL
+           runtimes[i] = times[i + 1] - times[i];
+           runtimes[i] /= 1000000.0;  // Convert ns to ms
+       }
+@@ -707,7 +707,7 @@ main(int argc, char **argv) {
+         assert(output_image);
+ 
+         int all_the_runs_were_succesful = 1;
+-        double avg_runtimes[16];
++        double avg_runtimes[6];
+         double avg_total = 0.0;
+         for (int iter = 0; iter < benchmarking_iterations; iter++) {
+             double iter_runtimes[4];
+@@ -715,7 +715,7 @@ main(int argc, char **argv) {
+                 input_image, width, height, threshold_lower, threshold_upper,
+                 output_image, iter_runtimes);
+ 
+-            for (int n = 0; n < 16; n++) {
++            for (int n = 0; n < 6; n++) {
+                 avg_runtimes[n] += iter_runtimes[n] / benchmarking_iterations;
+                 avg_total += iter_runtimes[n] / benchmarking_iterations;
+             }
+@@ -753,22 +753,24 @@ main(int argc, char **argv) {
+         printf("nonMaxSuppression time : %0.6f ms\n", avg_runtimes[2]);
+         printf("input image write buffer time         : %0.6f ms\n", avg_runtimes[3]);
+         printf("output image write buffer time        : %0.6f ms\n", avg_runtimes[4]);
+-        printf("magnitude buffer write buffer time    : %0.6f ms\n", avg_runtimes[5]);
+-        printf("phase buffer write buffer time        : %0.6f ms\n", avg_runtimes[6]);
+-        printf("sobel x write buffer time             : %0.6f ms\n", avg_runtimes[7]);
+-        printf("sobel y write buffer time             : %0.6f ms\n", avg_runtimes[8]);
+ 
+-        printf("input image read buffer time         : %0.6f ms\n", avg_runtimes[9]);
+-        printf("output image read buffer time        : %0.6f ms\n", avg_runtimes[10]);
+-        printf("magnitude buffer read buffer time    : %0.6f ms\n", avg_runtimes[11]);
+-        printf("phase buffer read buffer time        : %0.6f ms\n", avg_runtimes[12]);
+-        printf("sobel x read buffer time             : %0.6f ms\n", avg_runtimes[13]);
+-        printf("sobel y read buffer time             : %0.6f ms\n", avg_runtimes[14]);
+-
+-        printf("edgeTracing time       : %0.6f ms\n", avg_runtimes[15]);
++        printf("edgeTracing time       : %0.6f ms\n", avg_runtimes[5]);
+ 
+         printf("Total time             : %0.6f ms\n", avg_total);
+ 
++        // printf("magnitude buffer write buffer time    : %0.6f ms\n", avg_runtimes[5]);
++        // printf("phase buffer write buffer time        : %0.6f ms\n", avg_runtimes[6]);
++        // printf("sobel x write buffer time             : %0.6f ms\n", avg_runtimes[7]);
++        // printf("sobel y write buffer time             : %0.6f ms\n", avg_runtimes[8]);
++
++        // printf("input image read buffer time         : %0.6f ms\n", avg_runtimes[9]);
++        // printf("output image read buffer time        : %0.6f ms\n", avg_runtimes[10]);
++        // printf("magnitude buffer read buffer time    : %0.6f ms\n", avg_runtimes[11]);
++        // printf("phase buffer read buffer time        : %0.6f ms\n", avg_runtimes[12]);
++        // printf("sobel x read buffer time             : %0.6f ms\n", avg_runtimes[13]);
++        // printf("sobel y read buffer time             : %0.6f ms\n", avg_runtimes[14]);
++
++
+         write_pgm(output_image_path, output_image, width, height);
+         printf("Wrote output to %s\n", output_image_path);
+         if (all_the_runs_were_succesful) {
+-- 
+2.34.1
+

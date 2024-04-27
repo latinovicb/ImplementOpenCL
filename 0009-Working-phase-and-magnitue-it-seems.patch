@@ -1,0 +1,164 @@
+From ca088f9ccdcefd3c10b2a0b2497330bbd9af7aa9 Mon Sep 17 00:00:00 2001
+From: BL <borek.latinovic@powerdynax.com>
+Date: Fri, 24 Nov 2023 01:45:24 +0200
+Subject: [PATCH 09/16] Working phase and magnitue it seems
+
+---
+ canny.c  | 60 +++++++++++++++++++++++++++++++++++++++++++++-----------
+ canny.cl | 32 ++++++++++++++++++++++++++++++
+ 2 files changed, 81 insertions(+), 11 deletions(-)
+
+diff --git a/canny.c b/canny.c
+index e25534e..fbeda40 100644
+--- a/canny.c
++++ b/canny.c
+@@ -117,7 +117,6 @@ phaseAndMagnitude(
+     size_t height, uint8_t *restrict phase_out,
+     uint16_t *restrict magnitude_out) {
+     // LOOP 2.1
+-    #pragma omp parallel for
+     for (size_t y = 0; y < height; y++) {
+         // LOOP 2.2
+         for (size_t x = 0; x < width; x++) {
+@@ -430,9 +429,11 @@ cannyEdgeDetection(
+    chk(status, "clBuildProgram");
+    // Create the kernel object
+ 
++   size_t globalSize[2] = {width, height};
++
++   times[1] = gettimemono_ns();
++    //----------------------------Sobel3x3----------------------------------
+    kernel_sobel = clCreateKernel(program, "sobel3x3", &status);
+-   // kernel_phase_mag = clCreateKernel(program, "phaseAndMagnitude", &status);
+-   // kernel_kernel_max_supp = clCreateKernel(program, "nonMaxSuppression", &status);
+    chk(status, "clCreateKernel");
+     
+    
+@@ -443,12 +444,8 @@ cannyEdgeDetection(
+     status |= clSetKernelArg(kernel_sobel, 4, sizeof(cl_mem), &sobel_y_input);
+     chk(status, "clSetKernelArg");
+ 
+-
+-   size_t globalSize[2] = {width, height};
+-
+    status = clEnqueueNDRangeKernel(queue, kernel_sobel, 2, NULL, globalSize, NULL, 0,
+       NULL, NULL);
+-
+    chk(status, "clEnqueueNDRange");
+ 
+    status = clEnqueueReadBuffer(queue, buffer_input_image, CL_TRUE, 0, sizeof(uint8_t) * width * height, 
+@@ -464,6 +461,49 @@ cannyEdgeDetection(
+    chk(status, "clEnqueueReadBuffer");
+ 
+ 
++   times[2] = gettimemono_ns();
++
++    //----------------------------phaseAndMagnitude----------------------------------
++   kernel_phase_mag = clCreateKernel(program, "phaseAndMagnitude", &status);
++   chk(status, "clCreateKernel");
++    
++
++    status = clSetKernelArg(kernel_phase_mag, 0, sizeof(cl_mem), &sobel_x_input);
++    status |= clSetKernelArg(kernel_phase_mag, 1, sizeof(cl_mem), &sobel_y_input);
++    status |= clSetKernelArg(kernel_phase_mag, 2, sizeof(size_t), &width);
++    status |= clSetKernelArg(kernel_phase_mag, 3, sizeof(size_t), &height);
++    status |= clSetKernelArg(kernel_phase_mag, 4, sizeof(cl_mem), &phase_input);
++    status |= clSetKernelArg(kernel_phase_mag, 5, sizeof(cl_mem), &magnitude_input);
++    chk(status, "clSetKernelArg");
++
++   status = clEnqueueNDRangeKernel(queue, kernel_phase_mag, 2, NULL, globalSize, NULL, 0,
++      NULL, NULL);
++
++   chk(status, "clEnqueueNDRange");
++
++   status = clEnqueueReadBuffer(queue, sobel_x_input, CL_TRUE, 0, sizeof(uint16_t) * width * height, 
++         sobel_x, 0, NULL, NULL); 
++   chk(status, "clEnqueueReadBuffer");
++
++   status = clEnqueueReadBuffer(queue, sobel_y_input, CL_TRUE, 0, sizeof(uint16_t) * width * height, 
++         sobel_y, 0, NULL, NULL); 
++   chk(status, "clEnqueueReadBuffer");
++
++   status = clEnqueueReadBuffer(queue, phase_input, CL_TRUE, 0, sizeof(uint8_t) * width * height, 
++         phase, 0, NULL, NULL); 
++   chk(status, "clEnqueueReadBuffer");
++
++   status = clEnqueueReadBuffer(queue, magnitude_input, CL_TRUE, 0, sizeof(uint16_t) * width * height, 
++         magnitude, 0, NULL, NULL); 
++   chk(status, "clEnqueueReadBuffer");
++
++
++   // phaseAndMagnitude(sobel_x, sobel_y, width, height, phase, magnitude);
++  //
++   // kernel_kernel_max_supp = clCreateKernel(program, "nonMaxSuppression", &status);
++
++
++
+     // printf("%s", "Values taken from buffer");
+     // for (int i = 0; i < 10; i++) {
+     //     printf("%d ", input[i]);
+@@ -491,10 +531,7 @@ cannyEdgeDetection(
+     // // printf("%d", sobel_y);
+     // printf("\n");
+ 
+-    times[1] = gettimemono_ns();
+-    phaseAndMagnitude(sobel_x, sobel_y, width, height, phase, magnitude);
+ 
+-    times[2] = gettimemono_ns();
+     nonMaxSuppression(
+         magnitude, phase, width, height, threshold_lower, threshold_upper,
+         output);
+@@ -588,8 +625,9 @@ init(
+ void
+ destroy() {
+   
+-    // sobel stuff
+     clReleaseKernel(kernel_sobel);
++    clReleaseKernel(kernel_phase_mag);
++    clReleaseKernel(kernel_kernel_max_supp);
+     clReleaseProgram(program);
+     clReleaseCommandQueue(queue);
+ 
+diff --git a/canny.cl b/canny.cl
+index 080df91..c085d8c 100644
+--- a/canny.cl
++++ b/canny.cl
+@@ -41,3 +41,35 @@ __kernel void sobel3x3(
+     }
+ }
+ 
++__kernel void phaseAndMagnitude(
++    __global const short *in_x, 
++    __global const short *in_y, 
++    const uint width,
++    const uint height, 
++    __global uchar *phase_out,
++    __global ushort *magnitude_out) {
++
++    size_t gid_x = get_global_id(0);
++    size_t gid_y = get_global_id(1);
++
++    if (gid_x < width && gid_y < height) {
++        size_t gid = gid_y * width + gid_x;
++
++        // Output in range -PI:PI
++        float angle = atan2((float)in_y[gid], (float)in_x[gid]);
++
++        // Shift range -1:1
++        angle /= M_PI;
++
++        // Shift range -127.5:127.5
++        angle *= 127.5;
++
++        // Shift range 0.5:255.5
++        angle += (127.5 + 0.5);
++
++        // Downcasting truncates angle to range 0:255
++        phase_out[gid] = convert_uchar_sat(angle);
++
++        magnitude_out[gid] = abs(in_x[gid]) + abs(in_y[gid]);
++    }
++}
+-- 
+2.34.1
+

@@ -1,0 +1,148 @@
+From 391bc0eea4a10e7904be36352f9e7f2ec70acab9 Mon Sep 17 00:00:00 2001
+From: BL <borek.latinovic@powerdynax.com>
+Date: Thu, 23 Nov 2023 00:33:02 +0200
+Subject: [PATCH 06/16] try using input image as a buffer
+
+---
+ canny.c  | 28 ++++++++++++++++------------
+ canny.cl | 24 +++++++++++++++++++-----
+ 2 files changed, 35 insertions(+), 17 deletions(-)
+
+diff --git a/canny.c b/canny.c
+index 68e7c7a..f3abdec 100644
+--- a/canny.c
++++ b/canny.c
+@@ -14,6 +14,7 @@ VERSION 23.0 - Created
+ #include <omp.h>
+ 
+ #include <CL/cl.h>
++#include "opencl_util.h"
+ #include "util.h"
+ 
+ // Is used to find out frame times
+@@ -86,7 +87,6 @@ sobel3x3(
+     const uint8_t *restrict in, size_t width, size_t height,
+     int16_t *restrict output_x, int16_t *restrict output_y) {
+     // LOOP 1.1
+-    #pragma omp parallel for
+     for (size_t y = 0; y < height; y++) {
+         // LOOP 1.2
+         for (size_t x = 0; x < width; x++) {
+@@ -372,7 +372,7 @@ cannyEdgeDetection(
+ 
+     uint64_t times[5];
+     // Canny edge detection algorithm consists of the following functions:
+-    // times[0] = gettimemono_ns();
++    times[0] = gettimemono_ns();
+    
+ 
+    // *************************************************************
+@@ -431,11 +431,11 @@ cannyEdgeDetection(
+    chk(status, "clCreateKernel");
+     
+    
+-    status = clSetKernelArg(kernel_sobel, 0, sizeof(uint8_t) * width * height, &input);
++    status = clSetKernelArg(kernel_sobel, 0, sizeof(cl_mem), &buffer_input_image);
+     status |= clSetKernelArg(kernel_sobel, 1, sizeof(size_t), &width);
+     status |= clSetKernelArg(kernel_sobel, 2, sizeof(size_t), &height);
+-    status |= clSetKernelArg(kernel_sobel, 3, sizeof(cl_mem), &sobel_x);
+-    status |= clSetKernelArg(kernel_sobel, 4, sizeof(cl_mem), &sobel_y);
++    status |= clSetKernelArg(kernel_sobel, 3, sizeof(cl_mem), &sobel_x_input);
++    status |= clSetKernelArg(kernel_sobel, 4, sizeof(cl_mem), &sobel_y_input);
+     chk(status, "clSetKernelArg");
+   
+ 
+@@ -446,6 +446,10 @@ cannyEdgeDetection(
+ 
+    chk(status, "clEnqueueNDRange");
+ 
++   status = clEnqueueReadBuffer(queue, buffer_input_image, CL_TRUE, 0, sizeof(uint8_t) * width * height, 
++         input, 0, NULL, NULL); 
++   chk(status, "clEnqueueReadBuffer");
++
+    status = clEnqueueReadBuffer(queue, sobel_x_input, CL_TRUE, 0, sizeof(uint8_t) * width * height, 
+          sobel_x, 0, NULL, NULL); 
+    chk(status, "clEnqueueReadBuffer");
+@@ -458,18 +462,18 @@ cannyEdgeDetection(
+ 
+     // sobel3x3(input, width, height, sobel_x, sobel_y);
+ 
+-    // times[1] = gettimemono_ns();
++    times[1] = gettimemono_ns();
+     phaseAndMagnitude(sobel_x, sobel_y, width, height, phase, magnitude);
+ 
+-    // times[2] = gettimemono_ns();
++    times[2] = gettimemono_ns();
+     nonMaxSuppression(
+         magnitude, phase, width, height, threshold_lower, threshold_upper,
+         output);
+ 
+-    // times[3] = gettimemono_ns();
++    times[3] = gettimemono_ns();
+     edgeTracing(output, width, height);  // modifies output in-place
+ 
+-    // times[4] = gettimemono_ns();
++    times[4] = gettimemono_ns();
+     // Release intermediate arrays
+     free(sobel_x);
+     free(sobel_y);
+@@ -524,16 +528,16 @@ init(
+    chk(status, "clCreateCommandQueue");
+ 
+    // Create the input and output buffer for images
+-   buffer_input_image = clCreateBuffer(context, CL_MEM_READ_ONLY, sizeof(uint8_t)*width*height, NULL,
++   buffer_input_image = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(uint8_t)*width*height, NULL,
+        &status);
+    chk(status, "clCreateBuffer");
+ 
+-   buffer_output_image = clCreateBuffer(context, CL_MEM_READ_ONLY, sizeof(uint8_t)*width*height, NULL,
++   buffer_output_image = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(uint8_t)*width*height, NULL,
+        &status);
+    chk(status, "clCreateBuffer");
+ 
+    // Create the input and output buffers
+-   sobel_x_input = clCreateBuffer(context, CL_MEM_WRITE_ONLY, sizeof(uint16_t)*width*height, NULL,
++   sobel_x_input = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(uint16_t)*width*height, NULL,
+        &status);
+    chk(status, "clCreateBuffer");
+ 
+diff --git a/canny.cl b/canny.cl
+index ab633bf..f9d9ed0 100644
+--- a/canny.cl
++++ b/canny.cl
+@@ -1,9 +1,22 @@
++
++size_t
++idx(size_t x, size_t y, size_t width, size_t height, int xoff, int yoff) {
++    size_t resx = x;
++    if ((xoff > 0 && x < width - xoff) || (xoff < 0 && x >= (-xoff)))
++        resx += xoff;
++    size_t resy = y;
++    if ((yoff > 0 && y < height - yoff) || (yoff < 0 && y >= (-yoff)))
++        resy += yoff;
++    return resy * width + resx;
++}
++
+ __kernel void sobel3x3(
+-    __global const uchar *restrict in,
+-    const size_t width,
+-    const size_t height,
+-    __global short *restrict output_x,
+-    __global short *restrict output_y) {
++    __global int16 * in,
++    uint width,
++    uint height,
++    __global int16 * output_x,
++    __global int16 * output_y) {
++
+     // Get global ID in 2D
+     size_t gid_x = get_global_id(0);
+     size_t gid_y = get_global_id(1);
+@@ -31,3 +44,4 @@ __kernel void sobel3x3(
+     }
+ }
+ 
++
+-- 
+2.34.1
+

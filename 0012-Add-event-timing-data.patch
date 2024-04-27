@@ -1,0 +1,119 @@
+From e04295689f473bab24f2e80fd9392e0e0e7e7108 Mon Sep 17 00:00:00 2001
+From: BL <borek.latinovic@powerdynax.com>
+Date: Fri, 24 Nov 2023 18:28:07 +0200
+Subject: [PATCH 12/16] Add event timing data
+
+TODO:
+Add timers from buffers k
+Remove old timers
+---
+ canny.c | 34 ++++++++++++++++++++++++++--------
+ 1 file changed, 26 insertions(+), 8 deletions(-)
+
+diff --git a/canny.c b/canny.c
+index 7be9320..370947e 100644
+--- a/canny.c
++++ b/canny.c
+@@ -55,6 +55,16 @@ cl_kernel kernel_sobel;
+ cl_kernel kernel_phase_mag;
+ cl_kernel kernel_max_supp;
+ 
++cl_event sobel3x3_event;
++cl_event phaseAndMagnitude_event;
++cl_event nonMaxSuppression_event;
++cl_event input_image_event;
++cl_event output_image_event;
++cl_event magnitude_buffer_event;
++cl_event phase_buffer_event;
++cl_event soleb_x_event;
++cl_event soleb_y_event;
++
+ //**********************************************************************
+ //
+ typedef struct {
+@@ -231,7 +241,7 @@ cannyEdgeDetection(
+ 
+     uint64_t times[5];
+     // Canny edge detection algorithm consists of the following functions:
+-    times[0] = gettimemono_ns();
++    // times[0] = gettimemono_ns();
+    
+ 
+     // printf("%s", "Oriiginal values");
+@@ -295,7 +305,7 @@ cannyEdgeDetection(
+ 
+    size_t globalSize[2] = {width, height};
+ 
+-   times[1] = gettimemono_ns();
++   // times[1] = gettimemono_ns();
+     //----------------------------Sobel3x3----------------------------------
+    kernel_sobel = clCreateKernel(program, "sobel3x3", &status);
+    chk(status, "clCreateKernel");
+@@ -309,7 +319,7 @@ cannyEdgeDetection(
+     chk(status, "clSetKernelArg");
+ 
+    status = clEnqueueNDRangeKernel(queue, kernel_sobel, 2, NULL, globalSize, NULL, 0,
+-      NULL, NULL);
++      NULL, &sobel3x3_event);
+    chk(status, "clEnqueueNDRange");
+ 
+    status = clEnqueueReadBuffer(queue, buffer_input_image, CL_TRUE, 0, sizeof(uint8_t) * width * height, 
+@@ -324,8 +334,10 @@ cannyEdgeDetection(
+          sobel_y, 0, NULL, NULL); 
+    chk(status, "clEnqueueReadBuffer");
+ 
++  cl_double time_sobel3x3 = (cl_double)(getStartEndTime(sobel3x3_event))*(cl_double)(1e-6);
++  printf("sobel3x3 time %f from cl\n", time_sobel3x3);
+ 
+-   times[2] = gettimemono_ns();
++   // times[2] = gettimemono_ns();
+ 
+     //----------------------------phaseAndMagnitude----------------------------------
+    kernel_phase_mag = clCreateKernel(program, "phaseAndMagnitude", &status);
+@@ -341,7 +353,7 @@ cannyEdgeDetection(
+     chk(status, "clSetKernelArg");
+ 
+    status = clEnqueueNDRangeKernel(queue, kernel_phase_mag, 2, NULL, globalSize, NULL, 0,
+-      NULL, NULL);
++      NULL, &phaseAndMagnitude_event);
+ 
+    chk(status, "clEnqueueNDRange");
+ 
+@@ -361,6 +373,9 @@ cannyEdgeDetection(
+          magnitude, 0, NULL, NULL); 
+    chk(status, "clEnqueueReadBuffer");
+ 
++  cl_double time_phase_magnitude = (cl_double)(getStartEndTime(phaseAndMagnitude_event))*(cl_double)(1e-6);
++  printf("phaseAndMagnitude time %f from cl\n", time_phase_magnitude);
++  
+     //----------------------------nonMaxSuppression----------------------------------
+    kernel_max_supp = clCreateKernel(program, "nonMaxSuppression", &status);
+    chk(status, "clCreateKernel");
+@@ -375,7 +390,7 @@ cannyEdgeDetection(
+     chk(status, "clSetKernelArg");
+ 
+    status = clEnqueueNDRangeKernel(queue, kernel_max_supp, 2, NULL, globalSize, NULL, 0,
+-      NULL, NULL);
++      NULL, &nonMaxSuppression_event);
+    chk(status, "clEnqueueNDRange");
+ 
+    status = clEnqueueReadBuffer(queue, phase_input, CL_TRUE, 0, sizeof(uint8_t) * width * height, 
+@@ -390,10 +405,13 @@ cannyEdgeDetection(
+          output, 0, NULL, NULL); 
+    chk(status, "clEnqueueReadBuffer");
+ 
+-    times[3] = gettimemono_ns();
++  cl_double time_non_max_supp = (cl_double)(getStartEndTime(nonMaxSuppression_event))*(cl_double)(1e-6);
++  printf("nonMaxSuppression time %f from cl\n", time_non_max_supp);
++
++    // times[3] = gettimemono_ns();
+     edgeTracing(output, width, height);  // modifies output in-place
+ 
+-    times[4] = gettimemono_ns();
++    // times[4] = gettimemono_ns();
+     // Release intermediate arrays
+     free(sobel_x);
+     free(sobel_y);
+-- 
+2.34.1
+

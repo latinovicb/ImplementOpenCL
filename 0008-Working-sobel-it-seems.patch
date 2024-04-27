@@ -1,0 +1,77 @@
+From 3ad233d449b7d638bdb7597f8eea197b5231b1a3 Mon Sep 17 00:00:00 2001
+From: BL <borek.latinovic@powerdynax.com>
+Date: Thu, 23 Nov 2023 22:58:21 +0200
+Subject: [PATCH 08/16] Working sobel it seems
+
+---
+ canny.cl | 50 +++++++++++++++++++++++---------------------------
+ 1 file changed, 23 insertions(+), 27 deletions(-)
+
+diff --git a/canny.cl b/canny.cl
+index f9d9ed0..080df91 100644
+--- a/canny.cl
++++ b/canny.cl
+@@ -11,37 +11,33 @@ idx(size_t x, size_t y, size_t width, size_t height, int xoff, int yoff) {
+ }
+ 
+ __kernel void sobel3x3(
+-    __global int16 * in,
+-    uint width,
+-    uint height,
+-    __global int16 * output_x,
+-    __global int16 * output_y) {
++    __global const uchar *in, 
++    const uint width, 
++    const uint height,
++    __global short *output_x, 
++    __global short *output_y) {
+ 
+-    // Get global ID in 2D
+     size_t gid_x = get_global_id(0);
+     size_t gid_y = get_global_id(1);
+ 
+-    // Ensure the global ID is within the image dimensions
+-    if (gid_x < width && gid_y < height) {
+-        // Calculate linear index
+-        size_t gid = gid_y * width + gid_x;
+-
+-        // Sobel filter in x direction
+-        output_x[gid] = (-1) * in[idx(gid_x, gid_y, width, height, -1, -1)] +
+-                        1 * in[idx(gid_x, gid_y, width, height, 1, -1)] +
+-                        (-2) * in[idx(gid_x, gid_y, width, height, -1, 0)] +
+-                        2 * in[idx(gid_x, gid_y, width, height, 1, 0)] +
+-                        (-1) * in[idx(gid_x, gid_y, width, height, -1, 1)] +
+-                        1 * in[idx(gid_x, gid_y, width, height, 1, 1)];
+-
+-        // Sobel filter in y direction
+-        output_y[gid] = (-1) * in[idx(gid_x, gid_y, width, height, -1, -1)] +
+-                        1 * in[idx(gid_x, gid_y, width, height, -1, 1)] +
+-                        (-2) * in[idx(gid_x, gid_y, width, height, 0, -1)] +
+-                        2 * in[idx(gid_x, gid_y, width, height, 0, 1)] +
+-                        (-1) * in[idx(gid_x, gid_y, width, height, 1, -1)] +
+-                        1 * in[idx(gid_x, gid_y, width, height, 1, 1)];
++    if (gid_x > 0 && gid_x < width - 1 && gid_y > 0 && gid_y < height - 1) {
++        /* 3x3 sobel filter, first in x direction */
++        output_x[gid_y * width + gid_x] = 
++            (-1) * in[(gid_y - 1) * width + gid_x - 1] +
++            1 * in[(gid_y - 1) * width + gid_x + 1] +
++            (-2) * in[gid_y * width + gid_x - 1] +
++            2 * in[gid_y * width + gid_x + 1] +
++            (-1) * in[(gid_y + 1) * width + gid_x - 1] +
++            1 * in[(gid_y + 1) * width + gid_x + 1];
++
++        /* 3x3 sobel filter, in y direction */
++        output_y[gid_y * width + gid_x] = 
++            (-1) * in[(gid_y - 1) * width + gid_x - 1] +
++            1 * in[(gid_y + 1) * width + gid_x - 1] +
++            (-2) * in[(gid_y - 1) * width + gid_x] +
++            2 * in[(gid_y + 1) * width + gid_x] +
++            (-1) * in[(gid_y - 1) * width + gid_x + 1] +
++            1 * in[(gid_y + 1) * width + gid_x + 1];
+     }
+ }
+ 
+-
+-- 
+2.34.1
+

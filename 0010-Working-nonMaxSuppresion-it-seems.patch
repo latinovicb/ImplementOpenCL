@@ -1,0 +1,203 @@
+From 14d547d3bdec2896859cee5e86e8004951715305 Mon Sep 17 00:00:00 2001
+From: BL <borek.latinovic@powerdynax.com>
+Date: Fri, 24 Nov 2023 02:15:09 +0200
+Subject: [PATCH 10/16] Working nonMaxSuppresion it seems
+
+Created kernel for the function.
+Function changed based on the previous kernel function
+
+Added some files to .gitignore
+---
+ .gitignore |  1 +
+ canny.c    | 47 +++++++++++++++++++++++++++-------
+ canny.cl   | 75 ++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 114 insertions(+), 9 deletions(-)
+
+diff --git a/.gitignore b/.gitignore
+index 2641667..b8d4e47 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -1 +1,2 @@
+ *.mp4
++*.pgm
+diff --git a/canny.c b/canny.c
+index fbeda40..e5ecf66 100644
+--- a/canny.c
++++ b/canny.c
+@@ -53,7 +53,7 @@ cl_mem magnitude_input;
+ cl_program program;
+ cl_kernel kernel_sobel;
+ cl_kernel kernel_phase_mag;
+-cl_kernel kernel_kernel_max_supp;
++cl_kernel kernel_max_supp;
+ 
+ //**********************************************************************
+ //
+@@ -148,7 +148,6 @@ nonMaxSuppression(
+     size_t width, size_t height, int16_t threshold_lower,
+     uint16_t threshold_upper, uint8_t *restrict out) {
+     // LOOP 3.1
+-    #pragma omp parallel for
+     for (size_t y = 0; y < height; y++) {
+         // LOOP 3.2
+         for (size_t x = 0; x < width; x++) {
+@@ -390,6 +389,10 @@ cannyEdgeDetection(
+          input, 0, NULL, NULL);
+    chk(status, "clEnqueueWriteBuffer");
+ 
++   status = clEnqueueWriteBuffer(queue, buffer_output_image, CL_TRUE, 0, sizeof(uint8_t) * width * height, 
++         output, 0, NULL, NULL);
++   chk(status, "clEnqueueWriteBuffer");
++
+    // Write variables to buffers
+    status = clEnqueueWriteBuffer(queue, sobel_x_input, CL_TRUE, 0, sizeof(int16_t) * width * height, 
+          sobel_x, 0, NULL, NULL);
+@@ -497,11 +500,40 @@ cannyEdgeDetection(
+          magnitude, 0, NULL, NULL); 
+    chk(status, "clEnqueueReadBuffer");
+ 
+-
+    // phaseAndMagnitude(sobel_x, sobel_y, width, height, phase, magnitude);
+-  //
+-   // kernel_kernel_max_supp = clCreateKernel(program, "nonMaxSuppression", &status);
+ 
++    //----------------------------nonMaxSuppression----------------------------------
++   kernel_max_supp = clCreateKernel(program, "nonMaxSuppression", &status);
++   chk(status, "clCreateKernel");
++    
++    status = clSetKernelArg(kernel_max_supp, 0, sizeof(cl_mem), &magnitude_input);
++    status |= clSetKernelArg(kernel_max_supp, 1, sizeof(cl_mem), &phase_input);
++    status |= clSetKernelArg(kernel_max_supp, 2, sizeof(size_t), &width);
++    status |= clSetKernelArg(kernel_max_supp, 3, sizeof(size_t), &height);
++    status |= clSetKernelArg(kernel_max_supp, 4, sizeof(uint16_t), &threshold_lower);
++    status |= clSetKernelArg(kernel_max_supp, 5, sizeof(uint16_t), &threshold_upper);
++    status |= clSetKernelArg(kernel_max_supp, 6, sizeof(cl_mem), &buffer_output_image);
++    chk(status, "clSetKernelArg");
++
++   status = clEnqueueNDRangeKernel(queue, kernel_max_supp, 2, NULL, globalSize, NULL, 0,
++      NULL, NULL);
++   chk(status, "clEnqueueNDRange");
++
++   status = clEnqueueReadBuffer(queue, phase_input, CL_TRUE, 0, sizeof(uint8_t) * width * height, 
++         phase, 0, NULL, NULL); 
++   chk(status, "clEnqueueReadBuffer");
++
++   status = clEnqueueReadBuffer(queue, magnitude_input, CL_TRUE, 0, sizeof(uint16_t) * width * height, 
++         magnitude, 0, NULL, NULL); 
++   chk(status, "clEnqueueReadBuffer");
++
++   status = clEnqueueReadBuffer(queue, buffer_output_image, CL_TRUE, 0, sizeof(uint8_t) * width * height, 
++         output, 0, NULL, NULL); 
++   chk(status, "clEnqueueReadBuffer");
++
++    // nonMaxSuppression(
++    //     magnitude, phase, width, height, threshold_lower, threshold_upper,
++    //     output);
+ 
+ 
+     // printf("%s", "Values taken from buffer");
+@@ -532,9 +564,6 @@ cannyEdgeDetection(
+     // printf("\n");
+ 
+ 
+-    nonMaxSuppression(
+-        magnitude, phase, width, height, threshold_lower, threshold_upper,
+-        output);
+ 
+     times[3] = gettimemono_ns();
+     edgeTracing(output, width, height);  // modifies output in-place
+@@ -627,7 +656,7 @@ destroy() {
+   
+     clReleaseKernel(kernel_sobel);
+     clReleaseKernel(kernel_phase_mag);
+-    clReleaseKernel(kernel_kernel_max_supp);
++    clReleaseKernel(kernel_max_supp);
+     clReleaseProgram(program);
+     clReleaseCommandQueue(queue);
+ 
+diff --git a/canny.cl b/canny.cl
+index c085d8c..14448f2 100644
+--- a/canny.cl
++++ b/canny.cl
+@@ -73,3 +73,78 @@ __kernel void phaseAndMagnitude(
+         magnitude_out[gid] = abs(in_x[gid]) + abs(in_y[gid]);
+     }
+ }
++
++__kernel void nonMaxSuppression(
++    __global const ushort *magnitude, 
++    __global const uchar *phase,
++    const uint width, 
++    const uint height, 
++    short threshold_lower,
++    ushort threshold_upper, 
++    __global uchar *out) {
++
++    size_t gid_x = get_global_id(0);
++    size_t gid_y = get_global_id(1);
++
++    if (gid_x < width && gid_y < height) {
++        uchar sobel_angle = phase[gid_y * width + gid_x];
++
++        if (sobel_angle > 127) {
++            sobel_angle -= 128;
++        }
++
++        int sobel_orientation = 0;
++
++        if (sobel_angle < 16 || sobel_angle >= (7 * 16)) {
++            sobel_orientation = 2;
++        } else if (sobel_angle >= 16 && sobel_angle < 16 * 3) {
++            sobel_orientation = 1;
++        } else if (sobel_angle >= 16 * 3 && sobel_angle < 16 * 5) {
++            sobel_orientation = 0;
++        } else if (sobel_angle > 16 * 5 && sobel_angle <= 16 * 7) {
++            sobel_orientation = 3;
++        }
++
++        ushort sobel_magnitude = magnitude[gid_y * width + gid_x];
++
++        /* Non-maximum suppression
++         * Pick out the two neighbors that are perpendicular to the
++         * current edge pixel */
++        ushort neighbour_max = 0;
++        ushort neighbour_max2 = 0;
++
++        switch (sobel_orientation) {
++            case 0:
++                neighbour_max = magnitude[idx(gid_x, gid_y, width, height,0,-1)];
++                neighbour_max2 = magnitude[idx(gid_x, gid_y, width, height,0,1)];
++                break;
++            case 1:
++                neighbour_max = magnitude[idx(gid_x, gid_y, width, height,-1,-1)];
++                neighbour_max2 = magnitude[idx(gid_x, gid_y, width, height,1,1)];
++                break;
++            case 2:
++                neighbour_max = magnitude[idx(gid_x, gid_y, width, height,-1,0)];
++                neighbour_max2 = magnitude[idx(gid_x, gid_y, width, height,1,0)];
++                break;
++            case 3:
++            default:
++                neighbour_max = magnitude[idx(gid_x, gid_y, width, height,1,-1)];
++                neighbour_max2 = magnitude[idx(gid_x, gid_y, width, height,-1,1)];
++                break;
++        }
++
++        // Suppress the pixel here
++        if ((sobel_magnitude < neighbour_max) || (sobel_magnitude < neighbour_max2)) {
++            sobel_magnitude = 0;
++        }
++
++        /* Double thresholding */
++        // Marks YES pixels with 255, NO pixels with 0 and MAYBE pixels
++        // with 127
++        uchar t = 127;
++        if (sobel_magnitude > threshold_upper) t = 255;
++        if (sobel_magnitude <= threshold_lower) t = 0;
++        out[gid_y * width + gid_x] = t;
++    }
++}
++
+-- 
+2.34.1
+

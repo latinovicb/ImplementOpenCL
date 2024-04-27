@@ -1,0 +1,40 @@
+From c3d40605a7fa146b02629c7fb646a267bb43b28a Mon Sep 17 00:00:00 2001
+From: BL <borek.latinovic@powerdynax.com>
+Date: Tue, 24 Oct 2023 13:06:46 +0300
+Subject: [PATCH 02/16] Parallelize without need of change
+
+---
+ canny.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/canny.c b/canny.c
+index b395881..a1f2845 100644
+--- a/canny.c
++++ b/canny.c
+@@ -81,6 +81,7 @@ phaseAndMagnitude(
+     size_t height, uint8_t *restrict phase_out,
+     uint16_t *restrict magnitude_out) {
+     // LOOP 2.1
++    #pragma omp parallel for
+     for (size_t y = 0; y < height; y++) {
+         // LOOP 2.2
+         for (size_t x = 0; x < width; x++) {
+@@ -112,6 +113,7 @@ nonMaxSuppression(
+     size_t width, size_t height, int16_t threshold_lower,
+     uint16_t threshold_upper, uint8_t *restrict out) {
+     // LOOP 3.1
++    #pragma omp parallel for
+     for (size_t y = 0; y < height; y++) {
+         // LOOP 3.2
+         for (size_t x = 0; x < width; x++) {
+@@ -248,6 +250,7 @@ edgeTracing(uint8_t *restrict image, size_t width, size_t height) {
+     // Clear all remaining MAYBE pixels to NO, these were not reachable from
+     // any YES pixels
+     // LOOP 4.5
++    #pragma omp parallel for
+     for (int y = 0; y < height; y++) {
+         // LOOP 4.6
+         for (int x = 0; x < width; x++) {
+-- 
+2.34.1
+

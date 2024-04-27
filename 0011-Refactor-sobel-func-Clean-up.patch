@@ -1,0 +1,259 @@
+From dcd141f0dadfb0c3295704efdff7a4003515738e Mon Sep 17 00:00:00 2001
+From: BL <borek.latinovic@powerdynax.com>
+Date: Fri, 24 Nov 2023 17:53:31 +0200
+Subject: [PATCH 11/16] Refactor sobel func & Clean-up
+
+---
+ canny.c  | 175 -------------------------------------------------------
+ canny.cl |  35 ++++++-----
+ 2 files changed, 17 insertions(+), 193 deletions(-)
+
+diff --git a/canny.c b/canny.c
+index e5ecf66..7be9320 100644
+--- a/canny.c
++++ b/canny.c
+@@ -82,145 +82,6 @@ idx(size_t x, size_t y, size_t width, size_t height, int xoff, int yoff) {
+     return resy * width + resx;
+ }
+ 
+-void
+-sobel3x3(
+-    const uint8_t *restrict in, size_t width, size_t height,
+-    int16_t *restrict output_x, int16_t *restrict output_y) {
+-    // LOOP 1.1
+-    for (size_t y = 0; y < height; y++) {
+-        // LOOP 1.2
+-        for (size_t x = 0; x < width; x++) {
+-            size_t gid = y * width + x;
+-
+-            /* 3x3 sobel filter, first in x direction */
+-            output_x[gid] = (-1) * in[idx(x, y, width, height, -1, -1)] +
+-                            1 * in[idx(x, y, width, height, 1, -1)] +
+-                            (-2) * in[idx(x, y, width, height, -1, 0)] +
+-                            2 * in[idx(x, y, width, height, 1, 0)] +
+-                            (-1) * in[idx(x, y, width, height, -1, 1)] +
+-                            1 * in[idx(x, y, width, height, 1, 1)];
+-
+-            /* 3x3 sobel filter, in y direction */
+-            output_y[gid] = (-1) * in[idx(x, y, width, height, -1, -1)] +
+-                            1 * in[idx(x, y, width, height, -1, 1)] +
+-                            (-2) * in[idx(x, y, width, height, 0, -1)] +
+-                            2 * in[idx(x, y, width, height, 0, 1)] +
+-                            (-1) * in[idx(x, y, width, height, 1, -1)] +
+-                            1 * in[idx(x, y, width, height, 1, 1)];
+-        }
+-    }
+-}
+-
+-void
+-phaseAndMagnitude(
+-    const int16_t *restrict in_x, const int16_t *restrict in_y, size_t width,
+-    size_t height, uint8_t *restrict phase_out,
+-    uint16_t *restrict magnitude_out) {
+-    // LOOP 2.1
+-    for (size_t y = 0; y < height; y++) {
+-        // LOOP 2.2
+-        for (size_t x = 0; x < width; x++) {
+-            size_t gid = y * width + x;
+-
+-            // Output in range -PI:PI
+-            float angle = atan2f(in_y[gid], in_x[gid]);
+-
+-            // Shift range -1:1
+-            angle /= PI;
+-
+-            // Shift range -127.5:127.5
+-            angle *= 127.5;
+-
+-            // Shift range 0.5:255.5
+-            angle += (127.5 + 0.5);
+-
+-            // Downcasting truncates angle to range 0:255
+-            phase_out[gid] = (uint8_t)angle;
+-
+-            magnitude_out[gid] = abs(in_x[gid]) + abs(in_y[gid]);
+-        }
+-    }
+-}
+-
+-void
+-nonMaxSuppression(
+-    const uint16_t *restrict magnitude, const uint8_t *restrict phase,
+-    size_t width, size_t height, int16_t threshold_lower,
+-    uint16_t threshold_upper, uint8_t *restrict out) {
+-    // LOOP 3.1
+-    for (size_t y = 0; y < height; y++) {
+-        // LOOP 3.2
+-        for (size_t x = 0; x < width; x++) {
+-            size_t gid = y * width + x;
+-
+-            uint8_t sobel_angle = phase[gid];
+-
+-            if (sobel_angle > 127) {
+-                sobel_angle -= 128;
+-            }
+-
+-            int sobel_orientation = 0;
+-
+-            if (sobel_angle < 16 || sobel_angle >= (7 * 16)) {
+-                sobel_orientation = 2;
+-            } else if (sobel_angle >= 16 && sobel_angle < 16 * 3) {
+-                sobel_orientation = 1;
+-            } else if (sobel_angle >= 16 * 3 && sobel_angle < 16 * 5) {
+-                sobel_orientation = 0;
+-            } else if (sobel_angle > 16 * 5 && sobel_angle <= 16 * 7) {
+-                sobel_orientation = 3;
+-            }
+-
+-            uint16_t sobel_magnitude = magnitude[gid];
+-            /* Non-maximum suppression
+-             * Pick out the two neighbours that are perpendicular to the
+-             * current edge pixel */
+-            uint16_t neighbour_max = 0;
+-            uint16_t neighbour_max2 = 0;
+-            switch (sobel_orientation) {
+-                case 0:
+-                    neighbour_max =
+-                        magnitude[idx(x, y, width, height, 0, -1)];
+-                    neighbour_max2 =
+-                        magnitude[idx(x, y, width, height, 0, 1)];
+-                    break;
+-                case 1:
+-                    neighbour_max =
+-                        magnitude[idx(x, y, width, height, -1, -1)];
+-                    neighbour_max2 =
+-                        magnitude[idx(x, y, width, height, 1, 1)];
+-                    break;
+-                case 2:
+-                    neighbour_max =
+-                        magnitude[idx(x, y, width, height, -1, 0)];
+-                    neighbour_max2 =
+-                        magnitude[idx(x, y, width, height, 1, 0)];
+-                    break;
+-                case 3:
+-                default:
+-                    neighbour_max =
+-                        magnitude[idx(x, y, width, height, 1, -1)];
+-                    neighbour_max2 =
+-                        magnitude[idx(x, y, width, height, -1, 1)];
+-                    break;
+-            }
+-            // Suppress the pixel here
+-            if ((sobel_magnitude < neighbour_max) ||
+-                (sobel_magnitude < neighbour_max2)) {
+-                sobel_magnitude = 0;
+-            }
+-
+-            /* Double thresholding */
+-            // Marks YES pixels with 255, NO pixels with 0 and MAYBE pixels
+-            // with 127
+-            uint8_t t = 127;
+-            if (sobel_magnitude > threshold_upper) t = 255;
+-            if (sobel_magnitude <= threshold_lower) t = 0;
+-            out[gid] = t;
+-        }
+-    }
+-}
+-
+ void
+ edgeTracing(uint8_t *restrict image, size_t width, size_t height) {
+     // Uses a stack-based approach to incrementally spread the YES
+@@ -500,8 +361,6 @@ cannyEdgeDetection(
+          magnitude, 0, NULL, NULL); 
+    chk(status, "clEnqueueReadBuffer");
+ 
+-   // phaseAndMagnitude(sobel_x, sobel_y, width, height, phase, magnitude);
+-
+     //----------------------------nonMaxSuppression----------------------------------
+    kernel_max_supp = clCreateKernel(program, "nonMaxSuppression", &status);
+    chk(status, "clCreateKernel");
+@@ -531,40 +390,6 @@ cannyEdgeDetection(
+          output, 0, NULL, NULL); 
+    chk(status, "clEnqueueReadBuffer");
+ 
+-    // nonMaxSuppression(
+-    //     magnitude, phase, width, height, threshold_lower, threshold_upper,
+-    //     output);
+-
+-
+-    // printf("%s", "Values taken from buffer");
+-    // for (int i = 0; i < 10; i++) {
+-    //     printf("%d ", input[i]);
+-    // }
+-
+-
+-   // CONTINUE HERE from rotator project
+-
+-    // printf("%s", "Values taken from buffer");
+-    // printf("%d", sobel_x);
+-    // for (int i = 0; i < 10000; i++) {
+-    //     printf("%d ", sobel_x[i]);
+-    // }
+-    // // printf("%d", sobel_y);
+-    // printf("\n");
+-    // printf("\n");
+-    // sobel3x3(input, width, height, sobel_x, sobel_y);
+-
+-    // printf("%s", "Values from original function ");
+-    // // printf("%d", sobel_x);
+-    // for (int i = 0; i < 10000; i++) {
+-    //     printf("%d ", sobel_x[i]);
+-    // }
+-
+-    // // printf("%d", sobel_y);
+-    // printf("\n");
+-
+-
+-
+     times[3] = gettimemono_ns();
+     edgeTracing(output, width, height);  // modifies output in-place
+ 
+diff --git a/canny.cl b/canny.cl
+index 14448f2..9422b40 100644
+--- a/canny.cl
++++ b/canny.cl
+@@ -20,24 +20,23 @@ __kernel void sobel3x3(
+     size_t gid_x = get_global_id(0);
+     size_t gid_y = get_global_id(1);
+ 
+-    if (gid_x > 0 && gid_x < width - 1 && gid_y > 0 && gid_y < height - 1) {
+-        /* 3x3 sobel filter, first in x direction */
+-        output_x[gid_y * width + gid_x] = 
+-            (-1) * in[(gid_y - 1) * width + gid_x - 1] +
+-            1 * in[(gid_y - 1) * width + gid_x + 1] +
+-            (-2) * in[gid_y * width + gid_x - 1] +
+-            2 * in[gid_y * width + gid_x + 1] +
+-            (-1) * in[(gid_y + 1) * width + gid_x - 1] +
+-            1 * in[(gid_y + 1) * width + gid_x + 1];
+-
+-        /* 3x3 sobel filter, in y direction */
+-        output_y[gid_y * width + gid_x] = 
+-            (-1) * in[(gid_y - 1) * width + gid_x - 1] +
+-            1 * in[(gid_y + 1) * width + gid_x - 1] +
+-            (-2) * in[(gid_y - 1) * width + gid_x] +
+-            2 * in[(gid_y + 1) * width + gid_x] +
+-            (-1) * in[(gid_y - 1) * width + gid_x + 1] +
+-            1 * in[(gid_y + 1) * width + gid_x + 1];
++    if (gid_x < width && gid_y < height) {
++
++      /* 3x3 sobel filter, first in x direction */
++      output_x[gid_y * width + gid_x] = (-1) * in[idx(gid_x, gid_y, width, height, -1, -1)] +
++                      1 * in[idx(gid_x, gid_y, width, height, 1, -1)] +
++                      (-2) * in[idx(gid_x, gid_y, width, height, -1, 0)] +
++                      2 * in[idx(gid_x, gid_y, width, height, 1, 0)] +
++                      (-1) * in[idx(gid_x, gid_y, width, height, -1, 1)] +
++                      1 * in[idx(gid_x, gid_y, width, height, 1, 1)];
++
++      /* 3x3 sobel filter, in y direction */
++      output_y[gid_y * width + gid_x] = (-1) * in[idx(gid_x, gid_y, width, height, -1, -1)] +
++                      1 * in[idx(gid_x, gid_y, width, height, -1, 1)] +
++                      (-2) * in[idx(gid_x, gid_y, width, height, 0, -1)] +
++                      2 * in[idx(gid_x, gid_y, width, height, 0, 1)] +
++                      (-1) * in[idx(gid_x, gid_y, width, height, 1, -1)] +
++                      1 * in[idx(gid_x, gid_y, width, height, 1, 1)];
+     }
+ }
+ 
+-- 
+2.34.1
+

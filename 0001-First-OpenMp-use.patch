@@ -1,0 +1,32 @@
+From 643be3210b415791040ff37a173772bdaee78d8d Mon Sep 17 00:00:00 2001
+From: BL <borek.latinovic@powerdynax.com>
+Date: Tue, 24 Oct 2023 12:50:31 +0300
+Subject: [PATCH 01/16] First OpenMp use
+
+---
+ canny.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/canny.c b/canny.c
+index 61608ec..b395881 100644
+--- a/canny.c
++++ b/canny.c
+@@ -11,6 +11,7 @@ VERSION 23.0 - Created
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
++#include <omp.h>
+ 
+ #include "util.h"
+ 
+@@ -49,6 +50,7 @@ sobel3x3(
+     const uint8_t *restrict in, size_t width, size_t height,
+     int16_t *restrict output_x, int16_t *restrict output_y) {
+     // LOOP 1.1
++    #pragma omp parallel for
+     for (size_t y = 0; y < height; y++) {
+         // LOOP 1.2
+         for (size_t x = 0; x < width; x++) {
+-- 
+2.34.1
+

@@ -1,0 +1,63 @@
+From e22e6e03608cf938428ff4a59074f988d243b28c Mon Sep 17 00:00:00 2001
+From: BL <borek.latinovic@powerdynax.com>
+Date: Sat, 25 Nov 2023 17:41:33 +0200
+Subject: [PATCH 14/16] Fix datatype for GPU implenetation
+
+---
+ canny.c | 24 ++++++++++++++----------
+ 1 file changed, 14 insertions(+), 10 deletions(-)
+
+diff --git a/canny.c b/canny.c
+index 866ac20..3d59028 100644
+--- a/canny.c
++++ b/canny.c
+@@ -313,11 +313,15 @@ cannyEdgeDetection(
+     
+    
+     status = clSetKernelArg(kernel_sobel, 0, sizeof(cl_mem), &buffer_input_image);
+-    status |= clSetKernelArg(kernel_sobel, 1, sizeof(size_t), &width);
+-    status |= clSetKernelArg(kernel_sobel, 2, sizeof(size_t), &height);
+-    status |= clSetKernelArg(kernel_sobel, 3, sizeof(cl_mem), &sobel_x_input);
+-    status |= clSetKernelArg(kernel_sobel, 4, sizeof(cl_mem), &sobel_y_input);
+-    chk(status, "clSetKernelArg");
++    chk(status, "clSetKernelArg1");
++    status = clSetKernelArg(kernel_sobel, 1, sizeof(uint), &width);
++    chk(status, "clSetKernelArg2");
++	    status = clSetKernelArg(kernel_sobel, 2, sizeof(uint), &height);
++    chk(status, "clSetKernelArg3");
++    status = clSetKernelArg(kernel_sobel, 3, sizeof(cl_mem), &sobel_x_input);
++    chk(status, "clSetKernelArg4");
++    status = clSetKernelArg(kernel_sobel, 4, sizeof(cl_mem), &sobel_y_input);
++    chk(status, "clSetKernelArg5");
+ 
+    status = clEnqueueNDRangeKernel(queue, kernel_sobel, 2, NULL, globalSize, NULL, 0,
+       NULL, &sobel3x3_event);
+@@ -347,11 +351,11 @@ cannyEdgeDetection(
+ 
+     status = clSetKernelArg(kernel_phase_mag, 0, sizeof(cl_mem), &sobel_x_input);
+     status |= clSetKernelArg(kernel_phase_mag, 1, sizeof(cl_mem), &sobel_y_input);
+-    status |= clSetKernelArg(kernel_phase_mag, 2, sizeof(size_t), &width);
+-    status |= clSetKernelArg(kernel_phase_mag, 3, sizeof(size_t), &height);
++    status |= clSetKernelArg(kernel_phase_mag, 2, sizeof(uint), &width);
++    status |= clSetKernelArg(kernel_phase_mag, 3, sizeof(uint), &height);
+     status |= clSetKernelArg(kernel_phase_mag, 4, sizeof(cl_mem), &phase_input);
+     status |= clSetKernelArg(kernel_phase_mag, 5, sizeof(cl_mem), &magnitude_input);
+-    chk(status, "clSetKernelArg");
++    chk(status, "clSetKernelArg6");
+ 
+    status = clEnqueueNDRangeKernel(queue, kernel_phase_mag, 2, NULL, globalSize, NULL, 0,
+       NULL, &phaseAndMagnitude_event);
+@@ -384,8 +388,8 @@ cannyEdgeDetection(
+     
+     status = clSetKernelArg(kernel_max_supp, 0, sizeof(cl_mem), &magnitude_input);
+     status |= clSetKernelArg(kernel_max_supp, 1, sizeof(cl_mem), &phase_input);
+-    status |= clSetKernelArg(kernel_max_supp, 2, sizeof(size_t), &width);
+-    status |= clSetKernelArg(kernel_max_supp, 3, sizeof(size_t), &height);
++    status |= clSetKernelArg(kernel_max_supp, 2, sizeof(uint), &width);
++    status |= clSetKernelArg(kernel_max_supp, 3, sizeof(uint), &height);
+     status |= clSetKernelArg(kernel_max_supp, 4, sizeof(uint16_t), &threshold_lower);
+     status |= clSetKernelArg(kernel_max_supp, 5, sizeof(uint16_t), &threshold_upper);
+     status |= clSetKernelArg(kernel_max_supp, 6, sizeof(cl_mem), &buffer_output_image);
+-- 
+2.34.1
+
